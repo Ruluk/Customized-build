@@ -1,0 +1,121 @@
+# options
+develop=1
+RELEASE_DIR="Spidermonkey"
+
+usage(){
+cat << EOF
+usage: $0 [options]
+
+Build SpiderMonkey using Android NDK. It will be exported to $RELEASE_DIR.
+
+OPTIONS:
+-d	Build for development. This is default.
+-r	Build for release.
+-h	This help.
+
+EOF
+}
+
+while getopts "drh" OPTION; do
+case "$OPTION" in
+d)
+develop=1
+;;
+r)
+develop=
+;;
+h)
+usage
+exit 0
+;;
+esac
+done
+
+set -x
+
+host_os=`uname -s | tr "[:upper:]" "[:lower:]"`
+#host_arch=`uname -m`
+host_arch="x86"
+
+if test -z $NDK_ROOT; then
+NDK_ROOT="/Android/ndk"
+fi
+
+if test -z $ANDROID_SDK_ROOT; then
+ANDROID_SDK_ROOT="/Android/sdk"
+fi
+
+build_with_arch()
+{
+rm -rf dist
+rm -f ./config.cache
+
+if test -z $develop
+then
+    debug="--disable-debug --enable-optimize"
+else
+    debug="--enable-debug --disable-optimize --enable-trace-malloc --enable-signmar"
+fi
+
+sudo ../configure --with-android-ndk=$NDK_ROOT \
+             --with-android-sdk=$ANDROID_SDK_ROOT \
+             --enable-application=mobile/android \
+             --target=${TARGET_NAME} \
+             --with-android-toolchain=$NDK_ROOT/toolchains/${TOOLS_ARCH}-${GCC_VERSION}/prebuilt/${host_os}-${host_arch} \
+             --with-android-gnu-compiler-version=${GCC_VERSION} \
+             --with-android-version=9 \
+             --with-arch=${CPU_ARCH} \
+             --without-intl-api \
+             --enable-android-libstdcxx \
+             --disable-shared-js \
+             --disable-tests \
+             --disable-threadsafe \
+             --enable-strip \
+             --enable-install-strip \
+             $debug
+
+# make
+sudo make -j4
+
+# copy specific files from dist
+sudo rm -r "$RELEASE_DIR/include"
+sudo rm -r "$RELEASE_DIR/lib/$RELEASE_ARCH_DIR"
+sudo mkdir -p "$RELEASE_DIR/include"
+sudo cp -RL dist/include/* "$RELEASE_DIR/include/"
+sudo mkdir -p "$RELEASE_DIR/lib/$RELEASE_ARCH_DIR"
+sudo cp -L dist/lib/libjs_static.a "$RELEASE_DIR/lib/$RELEASE_ARCH_DIR/libjs_static.a"
+
+# strip unneeded symbols
+if test -z $develop
+then
+    sudo $NDK_ROOT/toolchains/${TOOLS_ARCH}-${GCC_VERSION}/prebuilt/${host_os}-${host_arch}/bin/${TOOLNAME_PREFIX}-strip \
+        --strip-unneeded "$RELEASE_DIR/lib/$RELEASE_ARCH_DIR/libjs_static.a"
+fi
+}
+
+# Build with armv6
+TOOLS_ARCH=arm-linux-androideabi
+TARGET_NAME=arm-linux-androideabi
+CPU_ARCH=armv6
+RELEASE_ARCH_DIR=armeabi
+GCC_VERSION=4.8
+TOOLNAME_PREFIX=arm-linux-androideabi
+build_with_arch
+
+# Build with armv7
+TOOLS_ARCH=arm-linux-androideabi
+TARGET_NAME=arm-linux-androideabi
+CPU_ARCH=armv7-a
+RELEASE_ARCH_DIR=armeabi-v7a
+GCC_VERSION=4.8
+TOOLNAME_PREFIX=arm-linux-androideabi
+build_with_arch
+
+# Build with x86
+TOOLS_ARCH=x86
+TARGET_NAME=i686-linux-android
+CPU_ARCH=i686
+RELEASE_ARCH_DIR=x86
+GCC_VERSION=4.8
+TOOLNAME_PREFIX=i686-linux-android
+build_with_arch
